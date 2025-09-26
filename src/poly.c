@@ -8,11 +8,11 @@
 #include <lua.h>
 #include <lualib.h>
 #include <lauxlib.h>
+#include "embedded_bundles.h"
 
 #define MAX_COMMAND_LENGTH 4096
 #define GLOBAL_CONFIG_FILE "poly.lua"
 #define LOCAL_CONFIG_FILE "poly.lua"
-#define BUNDLES_DIR "/usr/local/share/poly/bundles"
 
 static lua_State *L = NULL;
 
@@ -200,19 +200,25 @@ void print_usage() {
 }
 
 void add_bundle(const char *bundle_name, int is_global) {
-    char bundle_path[PATH_MAX];
     char config_path[PATH_MAX];
+    const char *bundle_content = NULL;
 
-    // Find bundle file - first check installed location, then local development
-    snprintf(bundle_path, sizeof(bundle_path), "%s/%s.lua", BUNDLES_DIR, bundle_name);
-    if (access(bundle_path, F_OK) != 0) {
-        // Try local development path
-        snprintf(bundle_path, sizeof(bundle_path), "src/bundles/%s.lua", bundle_name);
-        if (access(bundle_path, F_OK) != 0) {
-            fprintf(stderr, "Error: Bundle '%s' not found\n", bundle_name);
-            fprintf(stderr, "Available bundles: rails, node\n");
-            return;
+    // Find bundle in embedded bundles
+    for (int i = 0; embedded_bundles[i].name != NULL; i++) {
+        if (strcmp(embedded_bundles[i].name, bundle_name) == 0) {
+            bundle_content = embedded_bundles[i].content;
+            break;
         }
+    }
+
+    if (!bundle_content) {
+        fprintf(stderr, "Error: Bundle '%s' not found\n", bundle_name);
+        fprintf(stderr, "Available bundles:");
+        for (int i = 0; embedded_bundles[i].name != NULL; i++) {
+            fprintf(stderr, " %s", embedded_bundles[i].name);
+        }
+        fprintf(stderr, "\n");
+        return;
     }
 
     // Determine target config file
@@ -227,11 +233,11 @@ void add_bundle(const char *bundle_name, int is_global) {
         strcpy(config_path, LOCAL_CONFIG_FILE);
     }
 
-    // Load bundle configuration
+    // Load bundle configuration from embedded string
     lua_State *L_temp = luaL_newstate();
     luaL_openlibs(L_temp);
 
-    if (luaL_dofile(L_temp, bundle_path) != LUA_OK) {
+    if (luaL_dostring(L_temp, bundle_content) != LUA_OK) {
         fprintf(stderr, "Error loading bundle: %s\n", lua_tostring(L_temp, -1));
         lua_close(L_temp);
         return;
