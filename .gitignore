@@ -1,1 +1,11 @@
+# Build output
 poly
+
+# Lua source downloads
+lua-*.tar.gz
+lua-*/
+
+# OS files
+.DS_Store
+*.swp
+*.o

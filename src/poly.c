@@ -8,7 +8,7 @@
 #include <lua.h>
 #include <lualib.h>
 #include <lauxlib.h>
-#include "embedded_bundles.h"
+#include "bundles.h"
 
 #define MAX_COMMAND_LENGTH 4096
 #define GLOBAL_CONFIG_FILE "poly.lua"
@@ -201,23 +201,19 @@ void print_usage() {
 
 void add_bundle(const char *bundle_name, int is_global) {
     char config_path[PATH_MAX];
-    const char *bundle_content = NULL;
 
-    // Find bundle in embedded bundles
-    for (int i = 0; embedded_bundles[i].name != NULL; i++) {
-        if (strcmp(embedded_bundles[i].name, bundle_name) == 0) {
-            bundle_content = embedded_bundles[i].content;
+    // Check if bundle exists
+    int bundle_found = 0;
+    for (int i = 0; bundle_commands[i].bundle != NULL; i++) {
+        if (strcmp(bundle_commands[i].bundle, bundle_name) == 0) {
+            bundle_found = 1;
             break;
         }
     }
 
-    if (!bundle_content) {
+    if (!bundle_found) {
         fprintf(stderr, "Error: Bundle '%s' not found\n", bundle_name);
-        fprintf(stderr, "Available bundles:");
-        for (int i = 0; embedded_bundles[i].name != NULL; i++) {
-            fprintf(stderr, " %s", embedded_bundles[i].name);
-        }
-        fprintf(stderr, "\n");
+        fprintf(stderr, "Available bundles: %s\n", get_bundle_names());
         return;
     }
 
@@ -233,93 +229,66 @@ void add_bundle(const char *bundle_name, int is_global) {
         strcpy(config_path, LOCAL_CONFIG_FILE);
     }
 
-    // Load bundle configuration from embedded string
+    // Create Lua state for processing
     lua_State *L_temp = luaL_newstate();
     luaL_openlibs(L_temp);
 
-    if (luaL_dostring(L_temp, bundle_content) != LUA_OK) {
-        fprintf(stderr, "Error loading bundle: %s\n", lua_tostring(L_temp, -1));
-        lua_close(L_temp);
-        return;
-    }
-
     // Load existing config if it exists
-    lua_newtable(L_temp);
-    lua_setglobal(L_temp, "existing_config");
-
-    if (access(config_path, F_OK) == 0) {
-        if (luaL_dofile(L_temp, config_path) == LUA_OK) {
-            lua_setglobal(L_temp, "existing_config");
-        }
-    }
-
-    // Create merged configuration
     lua_newtable(L_temp);
     int merged_idx = lua_gettop(L_temp);
 
-    lua_getglobal(L_temp, "existing_config");
-    int existing_idx = lua_gettop(L_temp);
-    int bundle_idx = existing_idx - 2;
-
-    // First, copy all existing commands to merged
-    lua_pushnil(L_temp);
-    while (lua_next(L_temp, existing_idx) != 0) {
-        if (lua_isstring(L_temp, -2)) {
-            const char *key = lua_tostring(L_temp, -2);
-
-            // Create new array in merged for this command
-            lua_pushstring(L_temp, key);
-            lua_newtable(L_temp);
-
-            // Copy all entries from existing
-            if (lua_istable(L_temp, -3)) {
-                int len = lua_rawlen(L_temp, -3);
-                for (int i = 1; i <= len; i++) {
-                    lua_rawgeti(L_temp, -3, i);
-                    lua_rawseti(L_temp, -2, i);
-                }
+    if (access(config_path, F_OK) == 0) {
+        if (luaL_dofile(L_temp, config_path) == LUA_OK) {
+            // Copy existing config to merged
+            lua_pushnil(L_temp);
+            while (lua_next(L_temp, -2) != 0) {
+                lua_pushvalue(L_temp, -2);  // key
+                lua_pushvalue(L_temp, -2);  // value
+                lua_settable(L_temp, merged_idx);
+                lua_pop(L_temp, 1);
             }
-
-            lua_settable(L_temp, merged_idx);
+            lua_pop(L_temp, 1);  // pop existing config
         }
-        lua_pop(L_temp, 1);
     }
 
-    // Now append bundle commands to existing or create new
-    lua_pushnil(L_temp);
-    while (lua_next(L_temp, bundle_idx) != 0) {
-        if (lua_isstring(L_temp, -2)) {
-            const char *key = lua_tostring(L_temp, -2);
+    // Add commands from bundle
+    for (int i = 0; bundle_commands[i].bundle != NULL; i++) {
+        if (strcmp(bundle_commands[i].bundle, bundle_name) != 0) continue;
 
-            // Get or create the array for this command
-            lua_pushstring(L_temp, key);
+        const char *action = bundle_commands[i].action;
+
+        // Get or create action array
+        lua_pushstring(L_temp, action);
+        lua_gettable(L_temp, merged_idx);
+
+        if (lua_isnil(L_temp, -1)) {
+            lua_pop(L_temp, 1);
+            lua_pushstring(L_temp, action);
+            lua_newtable(L_temp);
+            lua_settable(L_temp, merged_idx);
+            lua_pushstring(L_temp, action);
             lua_gettable(L_temp, merged_idx);
-
-            if (lua_isnil(L_temp, -1)) {
-                // Command doesn't exist, create new array
-                lua_pop(L_temp, 1);
-                lua_pushstring(L_temp, key);
-                lua_newtable(L_temp);
-                lua_settable(L_temp, merged_idx);
-
-                // Get it back
-                lua_pushstring(L_temp, key);
-                lua_gettable(L_temp, merged_idx);
-            }
-
-            // Append bundle commands to this array
-            int existing_len = lua_rawlen(L_temp, -1);
-            if (lua_istable(L_temp, -2)) {
-                int bundle_len = lua_rawlen(L_temp, -2);
-                for (int i = 1; i <= bundle_len; i++) {
-                    lua_rawgeti(L_temp, -2, i);
-                    lua_rawseti(L_temp, -2, existing_len + i);
-                }
-            }
-
-            lua_pop(L_temp, 1);  // Pop the array
         }
-        lua_pop(L_temp, 1);
+
+        // Add command to array
+        int len = lua_rawlen(L_temp, -1);
+        lua_newtable(L_temp);  // new command entry
+
+        // Add test field if needed (only for global config)
+        if (is_global && bundle_commands[i].test) {
+            lua_pushstring(L_temp, "test");
+            lua_pushstring(L_temp, bundle_commands[i].test);
+            lua_settable(L_temp, -3);
+        }
+
+        // Add command field
+        lua_pushstring(L_temp, "command");
+        lua_pushstring(L_temp, bundle_commands[i].command);
+        lua_settable(L_temp, -3);
+
+        // Add to array
+        lua_rawseti(L_temp, -2, len + 1);
+        lua_pop(L_temp, 1);  // pop action array
     }
 
     // Write merged config to file
@@ -447,7 +416,7 @@ int main(int argc, char *argv[]) {
     if (strcmp(argv[1], "add") == 0) {
         if (argc < 3) {
             fprintf(stderr, "Usage: poly add <bundle> [--global]\n");
-            fprintf(stderr, "Available bundles: rails, node\n");
+            fprintf(stderr, "Available bundles: %s\n", get_bundle_names());
             return 1;
         }
 

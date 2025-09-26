@@ -4,7 +4,7 @@ TARGET = poly
 SRC = src/poly.c
 
 # Lua embedding
-LUA_VERSION = 5.4.7
+LUA_VERSION = 5.4.8
 LUA_DIR = lua-$(LUA_VERSION)
 LUA_SRC = $(LUA_DIR)/src
 LUA_OBJS = $(LUA_SRC)/lapi.o $(LUA_SRC)/lcode.o $(LUA_SRC)/lctype.o \
@@ -28,14 +28,11 @@ $(LUA_SRC): $(LUA_DIR).tar.gz
 	tar -xzf $(LUA_DIR).tar.gz
 	cd $(LUA_SRC) && $(MAKE) generic MYCFLAGS="-DLUA_USE_POSIX -DLUA_USE_DLOPEN" CC=$(CC)
 
-src/embedded_bundles.h: src/bundles/*.lua
-	./generate_bundles.sh
-
-$(TARGET): $(LUA_SRC) src/embedded_bundles.h $(SRC)
+$(TARGET): $(LUA_SRC) $(SRC) src/bundles.h
 	$(CC) $(CFLAGS) -o $(TARGET) $(SRC) $(LUA_OBJS) -I$(LUA_SRC) -lm -ldl
 
 clean:
-	rm -f $(TARGET) src/embedded_bundles.h
+	rm -f $(TARGET)
 	rm -rf $(LUA_DIR) $(LUA_DIR).tar.gz
 
 install: $(TARGET)
