@@ -14,8 +14,11 @@ clean:
 
 install: $(TARGET)
 	install -m 755 $(TARGET) /usr/local/bin/
+	mkdir -p /usr/local/share/poly/bundles
+	install -m 644 src/bundles/*.lua /usr/local/share/poly/bundles/
 
 uninstall:
 	rm -f /usr/local/bin/$(TARGET)
+	rm -rf /usr/local/share/poly
 
 .PHONY: all clean install uninstall
