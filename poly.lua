@@ -5,4 +5,8 @@ return {
 	clean = {
 		{ command = "make clean" },
 	},
+	install = {
+		{ command = "make install" },
+	},
 }
+
